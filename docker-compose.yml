@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  telegram-control-center:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram_control_center
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PANEL_PASSWORD=${PANEL_PASSWORD:-admin123}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID:-2040}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:-b18441a1ff607e10a989891a5462e627}
+    volumes:
+      - ./data:/app/data
