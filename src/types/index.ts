@@ -175,6 +175,9 @@ export interface Campaign {
     maxAttempts: number;
     backoffSeconds: number[];
   };
+  randomDelayEnabled?: boolean;
+  minDelaySeconds?: number;
+  maxDelaySeconds?: number;
   createdAt: string;
   lastRunAt?: string;
   nextRunAt?: string;
@@ -356,3 +359,25 @@ export interface BackupRecord {
   version: string;
   dataPayload?: string;
 }
+
+export interface AutoResponderConfig {
+  enabled: boolean;
+  triggerKeyword: string;
+  replyText: string;
+  cooldownHours: number;
+  ignoreBots: boolean;
+  accountIds: string[];
+}
+
+export interface AutoReplyLog {
+  id: string;
+  timestamp: string;
+  accountPhone: string;
+  senderId: string;
+  senderUsername?: string;
+  senderName?: string;
+  incomingMessage: string;
+  replySent: string;
+  status: 'SENT' | 'FAILED';
+}
+

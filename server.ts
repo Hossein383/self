@@ -108,6 +108,64 @@ function getTelegramClientInstance(
 // SESSION PERSISTENCE & KEEPALIVE ENGINE
 // ==========================================
 const SESSIONS_FILE = path.join(process.cwd(), 'data_sessions.json');
+const DATA_STORE_FILE = path.join(process.cwd(), 'data_store.json');
+
+function loadCentralStoreFromDisk() {
+  try {
+    if (!fs.existsSync(DATA_STORE_FILE)) {
+      return {
+        accounts: [],
+        proxies: [],
+        targets: [],
+        campaigns: [],
+        jobs: [],
+        plans: [],
+        backups: [],
+        deliveryLogs: [],
+        errorLogs: [],
+        auditLogs: [],
+        systemSettings: {
+          emergencyHalt: false,
+          minIntervalMinutes: 5,
+          maxMessagesPerMinutePerAccount: 5,
+          retryAttempts: 3,
+          workerConcurrency: 8,
+          telegramApiId: '20485921',
+          telegramApiHash: '••••••••••••••••••••••••••••••••',
+        },
+      };
+    }
+    const raw = fs.readFileSync(DATA_STORE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed?.systemSettings?.panelPassword) {
+      currentPanelPassword = parsed.systemSettings.panelPassword;
+    }
+    return parsed;
+  } catch (err) {
+    console.error('Error reading data_store.json:', err);
+    return {
+      accounts: [],
+      proxies: [],
+      targets: [],
+      campaigns: [],
+      jobs: [],
+      plans: [],
+      backups: [],
+      deliveryLogs: [],
+      errorLogs: [],
+      auditLogs: [],
+      systemSettings: { emergencyHalt: false },
+    };
+  }
+}
+
+function saveCentralStoreToDisk(data: any) {
+  try {
+    fs.writeFileSync(DATA_STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving data_store.json:', err);
+  }
+}
 
 interface StoredSession {
   userId: string;
@@ -221,7 +279,12 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ success: false, error: 'لطفاً گذرواژه امنیتی را وارد کنید.' });
   }
 
-  const validPassword = process.env.PANEL_PASSWORD || currentPanelPassword || 'admin123';
+  const storeData = loadCentralStoreFromDisk();
+  if (storeData?.systemSettings?.panelPassword) {
+    currentPanelPassword = storeData.systemSettings.panelPassword;
+  }
+
+  const validPassword = currentPanelPassword || process.env.PANEL_PASSWORD || 'admin123';
 
   if (cleanPass === validPassword || cleanPass === currentPanelPassword) {
     const token = 'tg_sec_token_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
@@ -247,12 +310,27 @@ app.post('/api/auth/change-password', (req, res) => {
     return res.status(400).json({ success: false, error: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
   }
 
-  if (currentPassword !== currentPanelPassword && currentPassword !== 'admin123') {
+  const storeData = loadCentralStoreFromDisk();
+  if (storeData?.systemSettings?.panelPassword) {
+    currentPanelPassword = storeData.systemSettings.panelPassword;
+  }
+
+  const validPassword = currentPanelPassword || process.env.PANEL_PASSWORD || 'admin123';
+
+  if (currentPassword !== validPassword && currentPassword !== currentPanelPassword && currentPassword !== 'admin123') {
     return res.status(401).json({ success: false, error: 'رمز عبور فعلی سیستم نادرست است.' });
   }
 
   currentPanelPassword = newPassword.trim();
-  return res.json({ success: true, message: 'رمز عبور پنل با موفقیت تغییر یافت.' });
+
+  // Save to persistent storage on server
+  if (storeData) {
+    if (!storeData.systemSettings) storeData.systemSettings = {};
+    storeData.systemSettings.panelPassword = currentPanelPassword;
+    saveCentralStoreToDisk(storeData);
+  }
+
+  return res.json({ success: true, message: 'رمز عبور پنل با موفقیت تغییر یافت و روی سرور ذخیره شد.' });
 });
 
 // Helper to format Telegram error messages
@@ -1123,7 +1201,246 @@ app.post('/api/telegram/resolve-entity', async (req, res) => {
 });
 
 // ==========================================
-// 10. TELEGRAM: Publish Message
+// 10. CENTRAL STORE & SERVER SCHEDULER ENGINE
+// ==========================================
+app.get('/api/store/state', (_req, res) => {
+  const storeData = loadCentralStoreFromDisk();
+  res.json({ success: true, state: storeData });
+});
+
+app.post('/api/store/state', (req, res) => {
+  const { state } = req.body;
+  if (!state || typeof state !== 'object') {
+    return res.status(400).json({ success: false, error: 'اطلاعات وضعیت نامعتبر است.' });
+  }
+
+  saveCentralStoreToDisk(state);
+  return res.json({ success: true, state });
+});
+
+async function publishTelegramMessageServer(
+  sessionString: string,
+  targetId: string,
+  message: string,
+  proxy?: TelegramProxyConfig,
+  apiId: number = DEFAULT_API_ID,
+  apiHash: string = DEFAULT_API_HASH
+) {
+  const start = Date.now();
+  let clientToUse: TelegramClient | null = null;
+
+  for (const client of connectedClients.values()) {
+    try {
+      if ((client.session as StringSession).save() === sessionString) {
+        clientToUse = client;
+        break;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!clientToUse) {
+    const { client } = getTelegramClientInstance(sessionString, apiId, apiHash, proxy);
+    clientToUse = client;
+    await clientToUse.connect();
+  }
+
+  if (!clientToUse.connected) {
+    await clientToUse.connect();
+  }
+
+  const targetEntity = await resolvePeerEntity(clientToUse, targetId);
+  const result: any = await clientToUse.sendMessage(targetEntity, { message });
+
+  return {
+    messageId: result?.id ? result.id.toString() : 'msg_' + Date.now(),
+    timestamp: new Date().toISOString(),
+    durationMs: Date.now() - start,
+  };
+}
+
+const runningServerCampaigns = new Set<string>();
+
+async function executeCampaignServerSide(campaign: any, storeData: any) {
+  console.log(`[Server Scheduler Engine] Executing campaign "${campaign.title || campaign.name}" (${campaign.id})...`);
+  const accounts = storeData.accounts || [];
+  const targets = storeData.targets || [];
+  const proxies = storeData.proxies || [];
+
+  const assignedAccounts = accounts.filter((acc: any) => {
+    if (acc.status === 'DEACTIVATED' || acc.status === 'DISCONNECTED') return false;
+    if (!campaign.accountIds || campaign.accountIds.length === 0) return true;
+    return campaign.accountIds.includes(acc.id);
+  });
+
+  if (assignedAccounts.length === 0) {
+    console.warn(`[Server Scheduler Engine] No active accounts found for campaign ${campaign.id}`);
+    return;
+  }
+
+  const assignedTargets = targets.filter((t: any) => {
+    if (!campaign.targetIds || campaign.targetIds.length === 0) return true;
+    return campaign.targetIds.includes(t.id);
+  });
+
+  if (assignedTargets.length === 0) {
+    console.warn(`[Server Scheduler Engine] No assigned targets found for campaign ${campaign.id}`);
+    return;
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (let i = 0; i < assignedTargets.length; i++) {
+    const target = assignedTargets[i];
+    const account = assignedAccounts[i % assignedAccounts.length];
+
+    if (!account || !account.encryptedSessionHash) continue;
+
+    // Human-like random delay between 30 to 90 seconds (anti-ban protective measure)
+    if (i > 0) {
+      const minDelay = 30; // seconds
+      const maxDelay = 90; // seconds
+      const randomSeconds = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+      console.log(`[Anti-Ban Human Delay] Sleeping for ${randomSeconds}s before sending message to target "${target.title || target.id}"...`);
+      await new Promise((res) => setTimeout(res, randomSeconds * 1000));
+    }
+
+    const targetTelegramId = target.telegramId || target.username || target.title;
+    const proxyObj = account.proxyId ? proxies.find((p: any) => p.id === account.proxyId) : undefined;
+
+    const proxyConfig: TelegramProxyConfig | undefined = proxyObj
+      ? {
+          host: proxyObj.host,
+          port: proxyObj.port,
+          type: proxyObj.protocol,
+          username: proxyObj.username,
+          password: proxyObj.password,
+          secret: proxyObj.secret,
+        }
+      : undefined;
+
+    const start = Date.now();
+    try {
+      await publishTelegramMessageServer(
+        account.encryptedSessionHash,
+        targetTelegramId,
+        campaign.messageContent,
+        proxyConfig,
+        account.apiId ? parseInt(account.apiId, 10) : DEFAULT_API_ID,
+        account.apiHash || DEFAULT_API_HASH
+      );
+
+      successCount++;
+      const duration = Date.now() - start;
+
+      const newLog = {
+        id: 'dlog-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+        timestamp: new Date().toISOString(),
+        campaignName: campaign.title || campaign.name,
+        targetTitle: target.title || targetTelegramId,
+        accountPhone: account.phone || account.displayName,
+        proxyLabel: proxyObj ? `${proxyObj.host}:${proxyObj.port}` : 'اتصال مستقیم',
+        messagePreview: campaign.messageContent,
+        status: 'SUCCESS',
+        durationMs: duration,
+      };
+
+      if (!Array.isArray(storeData.deliveryLogs)) storeData.deliveryLogs = [];
+      storeData.deliveryLogs.unshift(newLog);
+    } catch (err: any) {
+      failCount++;
+      const duration = Date.now() - start;
+      const formatted = formatTelegramError(err);
+
+      const newLog = {
+        id: 'dlog-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+        timestamp: new Date().toISOString(),
+        campaignName: campaign.title || campaign.name,
+        targetTitle: target.title || targetTelegramId,
+        accountPhone: account.phone || account.displayName,
+        proxyLabel: proxyObj ? `${proxyObj.host}:${proxyObj.port}` : 'اتصال مستقیم',
+        messagePreview: campaign.messageContent,
+        status: 'FAILED',
+        errorCode: formatted.code,
+        errorMessage: formatted.message,
+        durationMs: duration,
+      };
+
+      if (!Array.isArray(storeData.deliveryLogs)) storeData.deliveryLogs = [];
+      storeData.deliveryLogs.unshift(newLog);
+    }
+  }
+
+  if (Array.isArray(storeData.deliveryLogs) && storeData.deliveryLogs.length > 300) {
+    storeData.deliveryLogs = storeData.deliveryLogs.slice(0, 300);
+  }
+
+  const campaignIdx = storeData.campaigns.findIndex((c: any) => c.id === campaign.id);
+  if (campaignIdx !== -1) {
+    storeData.campaigns[campaignIdx].lastRunAt = new Date().toISOString();
+    storeData.campaigns[campaignIdx].successfulDelivers = (storeData.campaigns[campaignIdx].successfulDelivers || 0) + successCount;
+    storeData.campaigns[campaignIdx].failedDelivers = (storeData.campaigns[campaignIdx].failedDelivers || 0) + failCount;
+  }
+
+  saveCentralStoreToDisk(storeData);
+  console.log(`[Server Scheduler Engine] Completed "${campaign.title || campaign.name}": ${successCount} success, ${failCount} failed.`);
+}
+
+function startServerCampaignScheduler() {
+  console.log('[Server Scheduler Engine] 24/7 Background Scheduler initialized.');
+  setInterval(async () => {
+    try {
+      const storeData = loadCentralStoreFromDisk();
+      if (!storeData || !Array.isArray(storeData.campaigns) || storeData.campaigns.length === 0) return;
+      if (storeData.systemSettings?.emergencyHalt) return;
+
+      const now = Date.now();
+      for (const campaign of storeData.campaigns) {
+        if (campaign.status !== 'ACTIVE') continue;
+        if (runningServerCampaigns.has(campaign.id)) continue;
+
+        const intervalMs = Math.max(1, campaign.intervalMinutes || 1) * 60000;
+        const lastRun = campaign.lastRunAt ? new Date(campaign.lastRunAt).getTime() : 0;
+
+        if (!campaign.lastRunAt || lastRun + intervalMs <= now) {
+          runningServerCampaigns.add(campaign.id);
+          executeCampaignServerSide(campaign, storeData).finally(() => {
+            runningServerCampaigns.delete(campaign.id);
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[Server Scheduler Engine Loop Error]:', err);
+    }
+  }, 3000);
+}
+
+app.post('/api/store/execute-campaign-now', async (req, res) => {
+  const { campaignId } = req.body;
+  if (!campaignId) {
+    return res.status(400).json({ success: false, error: 'شناسه کمپین الزامی است.' });
+  }
+
+  const storeData = loadCentralStoreFromDisk();
+  const campaign = storeData?.campaigns?.find((c: any) => c.id === campaignId);
+
+  if (!campaign) {
+    return res.status(404).json({ success: false, error: 'کمپین یافت نشد.' });
+  }
+
+  try {
+    await executeCampaignServerSide(campaign, storeData);
+    const updatedStore = loadCentralStoreFromDisk();
+    return res.json({ success: true, state: updatedStore, message: 'کمپین با موفقیت روی سرور اجرا شد.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'خطا در اجرای کمپین روی سرور.' });
+  }
+});
+
+// ==========================================
+// 11. TELEGRAM: Publish Message
 // ==========================================
 app.post('/api/telegram/publish', async (req, res) => {
   const { sessionString, accountId, targetId, message, apiId, apiHash, proxy } = req.body;
@@ -1195,6 +1512,7 @@ app.get('/api/telegram/health', (_req, res) => {
 // ==========================================
 async function startServer() {
   await restoreSessionsFromDisk();
+  startServerCampaignScheduler();
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

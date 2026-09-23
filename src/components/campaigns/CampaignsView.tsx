@@ -22,6 +22,11 @@ import {
   Activity,
   CheckCircle,
   XCircle,
+  LayoutGrid,
+  List,
+  Grid3X3,
+  Search,
+  Filter,
 } from 'lucide-react';
 import { Campaign, PublishingTarget, TelegramAccount, TargetAccountAssignment, DeliveryLog } from '../../types';
 
@@ -86,6 +91,11 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
 }) => {
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+
+  // Layout View Mode & Filtering
+  const [viewMode, setViewMode] = useState<'COMPACT' | 'GRID' | 'TABLE'>('COMPACT');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'PAUSED' | 'DRAFT'>('ALL');
 
   // Executing & Logs Modal State
   const [executingCampaignId, setExecutingCampaignId] = useState<string | null>(null);
@@ -239,6 +249,16 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
 
   const uniqueCampaigns = Array.from(new Map(campaigns.map((c) => [c.id, c])).values());
 
+  const filteredCampaigns = uniqueCampaigns.filter((camp) => {
+    const query = searchQuery.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      camp.name.toLowerCase().includes(query) ||
+      camp.messageContent.toLowerCase().includes(query);
+    const matchesStatus = statusFilter === 'ALL' || camp.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
   return (
     <div id="campaigns-view" className="space-y-6">
       {/* Top Header */}
@@ -248,7 +268,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
             <Send className="h-5 w-5 text-indigo-400" />
             <span>{isRtl ? 'مدیریت کمپین‌ها و زمان‌بندی ارسال (Campaign Engine)' : 'Campaign Engine'}</span>
             <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-mono text-indigo-300">
-              {uniqueCampaigns.length} Total
+              {filteredCampaigns.length} / {uniqueCampaigns.length} Total
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
@@ -268,23 +288,132 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
         </button>
       </div>
 
-      {/* Campaigns List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {uniqueCampaigns.length === 0 && (
-          <div className="col-span-full rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-12 text-center space-y-4">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              <Send className="h-7 w-7" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-slate-200">
-                {isRtl ? 'هیچ کمپینی ایجاد نشده است' : 'No Campaigns Created'}
-              </h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {isRtl
+      {/* Toolbar: Search, Filter Tabs & View Mode Switcher */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 shadow-lg">
+        {/* Search Input */}
+        <div className="relative flex-1">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={isRtl ? 'جستجو در نام یا متن کمپین‌ها...' : 'Search campaigns...'}
+            className="w-full rounded-xl bg-slate-950 pr-9 pl-8 py-2 text-xs text-white border border-slate-800 focus:border-indigo-500 focus:outline-none"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800/80 self-start md:self-auto">
+          <button
+            onClick={() => setStatusFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              statusFilter === 'ALL'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {isRtl ? `همه (${uniqueCampaigns.length})` : `All (${uniqueCampaigns.length})`}
+          </button>
+          <button
+            onClick={() => setStatusFilter('ACTIVE')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              statusFilter === 'ACTIVE'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {isRtl
+              ? `فعال (${uniqueCampaigns.filter((c) => c.status === 'ACTIVE').length})`
+              : `Active (${uniqueCampaigns.filter((c) => c.status === 'ACTIVE').length})`}
+          </button>
+          <button
+            onClick={() => setStatusFilter('PAUSED')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              statusFilter === 'PAUSED'
+                ? 'bg-amber-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {isRtl
+              ? `متوقف (${uniqueCampaigns.filter((c) => c.status === 'PAUSED').length})`
+              : `Paused (${uniqueCampaigns.filter((c) => c.status === 'PAUSED').length})`}
+          </button>
+        </div>
+
+        {/* View Mode Switches */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800/80 self-start md:self-auto">
+          <button
+            onClick={() => setViewMode('COMPACT')}
+            title={isRtl ? 'نمای شبکه‌ای فشرده (دید در یک نگاه)' : 'Compact Grid View'}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              viewMode === 'COMPACT'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Grid3X3 className="h-4 w-4" />
+            <span className="hidden lg:inline">{isRtl ? 'کارت فشرده' : 'Compact'}</span>
+          </button>
+
+          <button
+            onClick={() => setViewMode('GRID')}
+            title={isRtl ? 'نمای کارت‌های استاندارد' : 'Standard Grid View'}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              viewMode === 'GRID'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            <span className="hidden lg:inline">{isRtl ? 'کارت استاندارد' : 'Grid'}</span>
+          </button>
+
+          <button
+            onClick={() => setViewMode('TABLE')}
+            title={isRtl ? 'نمای جدول مدیریتی' : 'Table View'}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              viewMode === 'TABLE'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <List className="h-4 w-4" />
+            <span className="hidden lg:inline">{isRtl ? 'جدول داده‌ها' : 'Table'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Empty State */}
+      {filteredCampaigns.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-12 text-center space-y-4">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+            <Send className="h-7 w-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-slate-200">
+              {uniqueCampaigns.length === 0
+                ? isRtl ? 'هیچ کمپینی ایجاد نشده است' : 'No Campaigns Created'
+                : isRtl ? 'هیچ کمپینی با این مشخصات یافت نشد' : 'No Matching Campaigns Found'}
+            </h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
+              {uniqueCampaigns.length === 0
+                ? isRtl
                   ? 'برای انتشار خودکار پیام‌ها، عکس‌ها یا نظرسنجی‌ها به کانال‌ها و سوپرگروه‌ها، اولین کمپین خود را تعریف نمایید.'
-                  : 'Define your first campaign to schedule and broadcast content across your target groups and channels.'}
-              </p>
-            </div>
+                  : 'Define your first campaign to schedule and broadcast content across your target groups and channels.'
+                : isRtl
+                  ? 'عبارت جستجو یا فیلترهای انتخابی خود را تغییر دهید.'
+                  : 'Try adjusting your search criteria or filters.'}
+            </p>
+          </div>
+          {uniqueCampaigns.length === 0 && (
             <button
               onClick={handleOpenNew}
               className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 text-xs font-semibold text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
@@ -292,106 +421,106 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
               <Plus className="h-4 w-4" />
               <span>{isRtl ? 'ایجاد اولین کمپین' : 'Create First Campaign'}</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
-        {uniqueCampaigns.map((camp) => {
-          const isActive = camp.status === 'ACTIVE';
-          const isPaused = camp.status === 'PAUSED';
+      {/* 1. COMPACT GRID VIEW (5 Columns on Large Screens for Single-Glance Overview) */}
+      {viewMode === 'COMPACT' && filteredCampaigns.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          {filteredCampaigns.map((camp) => {
+            const isActive = camp.status === 'ACTIVE';
+            const isPaused = camp.status === 'PAUSED';
 
-          return (
-            <div
-              key={camp.id}
-              id={`campaign-card-${camp.id}`}
-              className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl space-y-4 hover:border-indigo-500/40 transition-all flex flex-col justify-between"
-            >
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-bold text-sm text-white">{camp.name}</h3>
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-mono font-semibold border ${
-                      isActive
-                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                        : isPaused
-                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                        : 'bg-slate-800 text-slate-400 border-slate-700'
-                    }`}
-                  >
-                    {camp.status}
-                  </span>
+            return (
+              <div
+                key={camp.id}
+                id={`campaign-card-${camp.id}`}
+                className="rounded-xl border border-slate-800 bg-slate-900/95 p-3 shadow-lg space-y-2.5 hover:border-indigo-500/50 transition-all flex flex-col justify-between"
+              >
+                <div className="space-y-2">
+                  {/* Header: Title & Status */}
+                  <div className="flex items-start justify-between gap-1.5">
+                    <h3 className="font-bold text-xs text-white truncate max-w-[130px]" title={camp.name}>
+                      {camp.name}
+                    </h3>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[9px] font-mono font-semibold border shrink-0 ${
+                        isActive
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          : isPaused
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      {camp.status}
+                    </span>
+                  </div>
+
+                  {/* Countdown Bar */}
+                  <div className="rounded-lg bg-slate-950/80 p-2 border border-slate-800 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-400 text-[10px]">
+                      {isRtl ? 'ارسال بعدی:' : 'Next:'}
+                    </span>
+                    <CampaignCountdown campaign={camp} isRtl={isRtl} />
+                  </div>
+
+                  {/* Micro Stats */}
+                  <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-400 bg-slate-950/40 p-1.5 rounded-lg border border-slate-800/50">
+                    <div>
+                      <span>{isRtl ? 'دوره:' : 'Interval:'}</span>{' '}
+                      <strong className="text-slate-200 font-mono">{camp.intervalMinutes}m</strong>
+                    </div>
+                    <div>
+                      <span>{isRtl ? 'تارگت:' : 'Targets:'}</span>{' '}
+                      <strong className="text-indigo-300 font-mono">{camp.targetIds?.length || 0}</strong>
+                    </div>
+                    <div className="col-span-2 flex items-center justify-between border-t border-slate-800/50 pt-1 mt-0.5">
+                      <span>{isRtl ? 'موفق/خطا:' : 'Pass/Fail:'}</span>
+                      <span className="font-mono">
+                        <strong className="text-emerald-400">{camp.successfulRuns || 0}</strong> /{' '}
+                        <strong className="text-rose-400">{camp.failedRuns || 0}</strong>
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Message preview snippet */}
-                <div className="rounded-xl bg-slate-950/70 p-3 border border-slate-800 text-xs text-slate-300 font-mono line-clamp-3">
-                  {camp.messageContent}
-                </div>
-
-                {/* Live Countdown Bar */}
-                <div className="rounded-xl bg-slate-950/90 p-2.5 border border-slate-800/80 flex items-center justify-between text-xs">
-                  <span className="text-slate-400 text-[11px]">
-                    {isRtl ? 'زمان تا ارسال بعدی:' : 'Next send in:'}
-                  </span>
-                  <CampaignCountdown campaign={camp} isRtl={isRtl} />
-                </div>
-
-                {/* Meta details */}
-                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="h-3 w-3 text-indigo-400" />
-                    <span>{isRtl ? `دوره: هر ${camp.intervalMinutes} دقیقه` : `Interval: ${camp.intervalMinutes}m`}</span>
-                  </div>
-                  <div>
-                    <span>{isRtl ? 'اهداف:' : 'Targets:'} <strong className="text-slate-200 font-mono">{camp.targetIds.length}</strong></span>
-                  </div>
-                  <div>
-                    <span>{isRtl ? 'آخرین ارسال:' : 'Last sent:'} <strong className="text-slate-300 font-mono">{camp.lastRunAt ? new Date(camp.lastRunAt).toLocaleTimeString('fa-IR') : (isRtl ? 'هنوز نسپریده' : 'Never')}</strong></span>
-                  </div>
-                  <div>
-                    <span>{isRtl ? 'موفق/ناموفق:' : 'Success/Fail:'} <strong className="text-emerald-400 font-mono">{camp.successfulRuns}</strong>/<strong className="text-rose-400 font-mono">{camp.failedRuns}</strong></span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex flex-col gap-2 pt-3 border-t border-slate-800">
-                <div className="flex items-center justify-between gap-2">
+                {/* Compact Actions */}
+                <div className="space-y-1.5 pt-2 border-t border-slate-800">
                   <button
                     onClick={() => handleTriggerNow(camp.id)}
                     disabled={executingCampaignId === camp.id}
-                    className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-semibold shadow-md transition-all cursor-pointer disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 text-[11px] font-bold shadow-md transition-all cursor-pointer disabled:opacity-50"
                   >
                     {executingCampaignId === camp.id ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin text-white" />
+                      <RefreshCw className="h-3 w-3 animate-spin text-white" />
                     ) : (
-                      <Zap className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
+                      <Zap className="h-3 w-3 text-amber-300 fill-amber-300" />
                     )}
-                    <span>{executingCampaignId === camp.id ? (isRtl ? 'در حال ارسال...' : 'Sending...') : (isRtl ? 'ارسال فوری (الان بفرست)' : 'Send Now')}</span>
+                    <span>{executingCampaignId === camp.id ? (isRtl ? 'در حال ارسال...' : 'Sending...') : (isRtl ? 'ارسال فوری' : 'Send Now')}</span>
                   </button>
 
-                  <button
-                    onClick={() => setActiveLogsCampaign(camp)}
-                    className="flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer"
-                    title={isRtl ? 'مشاهده لاگ‌های کمپین' : 'View Campaign Logs'}
-                  >
-                    <Activity className="h-3.5 w-3.5 text-cyan-400" />
-                    <span>{isRtl ? 'لاگ‌ها' : 'Logs'}</span>
-                  </button>
-                </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      onClick={() => handleTogglePause(camp)}
+                      className={`flex-1 flex items-center justify-center gap-1 rounded-lg py-1 text-[10px] font-semibold transition-all ${
+                        isActive
+                          ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                      }`}
+                    >
+                      {isActive ? <Pause className="h-2.5 w-2.5" /> : <Play className="h-2.5 w-2.5" />}
+                      <span>{isActive ? (isRtl ? 'توقف' : 'Pause') : (isRtl ? 'ادامه' : 'Resume')}</span>
+                    </button>
 
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={() => handleTogglePause(camp)}
-                    className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
-                      isActive
-                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-                        : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
-                    }`}
-                  >
-                    {isActive ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    <span>{isActive ? (isRtl ? 'توقف موقت' : 'Pause') : (isRtl ? 'فعال‌سازی مجدد' : 'Resume')}</span>
-                  </button>
+                    <button
+                      onClick={() => setActiveLogsCampaign(camp)}
+                      className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400"
+                      title={isRtl ? 'مشاهده لاگ‌ها' : 'View Logs'}
+                    >
+                      <Activity className="h-3 w-3" />
+                    </button>
 
-                  <div className="flex items-center gap-1">
                     <button
                       onClick={() => {
                         setName(camp.name);
@@ -404,25 +533,284 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                         setEditingCampaignId(camp.id);
                         setIsComposerOpen(true);
                       }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white"
-                      title={isRtl ? 'ویرایش کمپین' : 'Edit Campaign'}
+                      className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                      title={isRtl ? 'ویرایش' : 'Edit'}
                     >
-                      <Edit3 className="h-3.5 w-3.5" />
+                      <Edit3 className="h-3 w-3" />
                     </button>
+
                     <button
                       onClick={() => onDeleteCampaign(camp.id)}
-                      className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/20 hover:text-rose-300"
-                      title={isRtl ? 'حذف کمپین' : 'Delete Campaign'}
+                      className="p-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-rose-400"
+                      title={isRtl ? 'حذف' : 'Delete'}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 2. STANDARD GRID VIEW */}
+      {viewMode === 'GRID' && filteredCampaigns.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filteredCampaigns.map((camp) => {
+            const isActive = camp.status === 'ACTIVE';
+            const isPaused = camp.status === 'PAUSED';
+
+            return (
+              <div
+                key={camp.id}
+                id={`campaign-card-${camp.id}`}
+                className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl space-y-4 hover:border-indigo-500/40 transition-all flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-bold text-sm text-white">{camp.name}</h3>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-mono font-semibold border ${
+                        isActive
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          : isPaused
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      {camp.status}
+                    </span>
+                  </div>
+
+                  {/* Message preview snippet */}
+                  <div className="rounded-xl bg-slate-950/70 p-3 border border-slate-800 text-xs text-slate-300 font-mono line-clamp-3">
+                    {camp.messageContent}
+                  </div>
+
+                  {/* Live Countdown Bar */}
+                  <div className="rounded-xl bg-slate-950/90 p-2.5 border border-slate-800/80 flex items-center justify-between text-xs">
+                    <span className="text-slate-400 text-[11px]">
+                      {isRtl ? 'زمان تا ارسال بعدی:' : 'Next send in:'}
+                    </span>
+                    <CampaignCountdown campaign={camp} isRtl={isRtl} />
+                  </div>
+
+                  {/* Meta details */}
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-3 w-3 text-indigo-400" />
+                      <span>{isRtl ? `دوره: هر ${camp.intervalMinutes} دقیقه` : `Interval: ${camp.intervalMinutes}m`}</span>
+                    </div>
+                    <div>
+                      <span>{isRtl ? 'اهداف:' : 'Targets:'} <strong className="text-slate-200 font-mono">{camp.targetIds.length}</strong></span>
+                    </div>
+                    <div>
+                      <span>{isRtl ? 'آخرین ارسال:' : 'Last sent:'} <strong className="text-slate-300 font-mono">{camp.lastRunAt ? new Date(camp.lastRunAt).toLocaleTimeString('fa-IR') : (isRtl ? 'هنوز نسپریده' : 'Never')}</strong></span>
+                    </div>
+                    <div>
+                      <span>{isRtl ? 'موفق/ناموفق:' : 'Success/Fail:'} <strong className="text-emerald-400 font-mono">{camp.successfulRuns}</strong>/<strong className="text-rose-400 font-mono">{camp.failedRuns}</strong></span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex flex-col gap-2 pt-3 border-t border-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => handleTriggerNow(camp.id)}
+                      disabled={executingCampaignId === camp.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-xs font-semibold shadow-md transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {executingCampaignId === camp.id ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-white" />
+                      ) : (
+                        <Zap className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
+                      )}
+                      <span>{executingCampaignId === camp.id ? (isRtl ? 'در حال ارسال...' : 'Sending...') : (isRtl ? 'ارسال فوری (الان بفرست)' : 'Send Now')}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveLogsCampaign(camp)}
+                      className="flex items-center gap-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 text-xs font-semibold transition-all cursor-pointer"
+                      title={isRtl ? 'مشاهده لاگ‌های کمپین' : 'View Campaign Logs'}
+                    >
+                      <Activity className="h-3.5 w-3.5 text-cyan-400" />
+                      <span>{isRtl ? 'لاگ‌ها' : 'Logs'}</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={() => handleTogglePause(camp)}
+                      className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
+                        isActive
+                          ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                      }`}
+                    >
+                      {isActive ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                      <span>{isActive ? (isRtl ? 'توقف موقت' : 'Pause') : (isRtl ? 'فعال‌سازی مجدد' : 'Resume')}</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setName(camp.name);
+                          setMessageContent(camp.messageContent);
+                          setParseMode(camp.parseMode);
+                          setMediaUrl(camp.mediaUrls[0] || '');
+                          setIntervalMinutes(camp.intervalMinutes);
+                          setSelectedTargetIds(camp.targetIds);
+                          setSelectedAccountIds(camp.accountIds);
+                          setEditingCampaignId(camp.id);
+                          setIsComposerOpen(true);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white"
+                        title={isRtl ? 'ویرایش کمپین' : 'Edit Campaign'}
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => onDeleteCampaign(camp.id)}
+                        className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/20 hover:text-rose-300"
+                        title={isRtl ? 'حذف کمپین' : 'Delete Campaign'}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 3. TABLE VIEW */}
+      {viewMode === 'TABLE' && filteredCampaigns.length > 0 && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/90 shadow-xl overflow-x-auto">
+          <table className="w-full text-right text-xs">
+            <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+              <tr>
+                <th className="px-4 py-3">{isRtl ? 'نام کمپین' : 'Campaign Name'}</th>
+                <th className="px-4 py-3">{isRtl ? 'وضعیت' : 'Status'}</th>
+                <th className="px-4 py-3">{isRtl ? 'زمان تا ارسال بعدی' : 'Next Dispatch'}</th>
+                <th className="px-4 py-3">{isRtl ? 'دوره (دقیقه)' : 'Interval'}</th>
+                <th className="px-4 py-3">{isRtl ? 'اهداف' : 'Targets'}</th>
+                <th className="px-4 py-3">{isRtl ? 'موفق/ناموفق' : 'Pass/Fail'}</th>
+                <th className="px-4 py-3 text-center">{isRtl ? 'عملیات' : 'Actions'}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {filteredCampaigns.map((camp) => {
+                const isActive = camp.status === 'ACTIVE';
+                const isPaused = camp.status === 'PAUSED';
+
+                return (
+                  <tr key={camp.id} className="hover:bg-slate-850/50 transition-all">
+                    <td className="px-4 py-3 font-bold text-white">
+                      <div className="flex flex-col">
+                        <span>{camp.name}</span>
+                        <span className="text-[10px] text-slate-400 line-clamp-1 font-mono font-normal">
+                          {camp.messageContent}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-mono font-semibold border ${
+                          isActive
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : isPaused
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {camp.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <CampaignCountdown campaign={camp} isRtl={isRtl} />
+                    </td>
+                    <td className="px-4 py-3 font-mono text-slate-300">
+                      هر {camp.intervalMinutes} دقیقه
+                    </td>
+                    <td className="px-4 py-3 font-mono text-indigo-300 font-bold">
+                      {camp.targetIds?.length || 0}
+                    </td>
+                    <td className="px-4 py-3 font-mono">
+                      <span className="text-emerald-400 font-bold">{camp.successfulRuns || 0}</span> /{' '}
+                      <span className="text-rose-400 font-bold">{camp.failedRuns || 0}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handleTriggerNow(camp.id)}
+                          disabled={executingCampaignId === camp.id}
+                          className="flex items-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 text-[11px] font-bold shadow transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          {executingCampaignId === camp.id ? (
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Zap className="h-3 w-3 text-amber-300 fill-amber-300" />
+                          )}
+                          <span>{isRtl ? 'ارسال فوری' : 'Send'}</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleTogglePause(camp)}
+                          className={`p-1.5 rounded-lg text-xs font-semibold transition-all ${
+                            isActive
+                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                              : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                          }`}
+                        >
+                          {isActive ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        </button>
+
+                        <button
+                          onClick={() => setActiveLogsCampaign(camp)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400"
+                          title={isRtl ? 'لاگ‌ها' : 'Logs'}
+                        >
+                          <Activity className="h-3.5 w-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setName(camp.name);
+                            setMessageContent(camp.messageContent);
+                            setParseMode(camp.parseMode);
+                            setMediaUrl(camp.mediaUrls[0] || '');
+                            setIntervalMinutes(camp.intervalMinutes);
+                            setSelectedTargetIds(camp.targetIds);
+                            setSelectedAccountIds(camp.accountIds);
+                            setEditingCampaignId(camp.id);
+                            setIsComposerOpen(true);
+                          }}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                          title={isRtl ? 'ویرایش' : 'Edit'}
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => onDeleteCampaign(camp.id)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-rose-400"
+                          title={isRtl ? 'حذف' : 'Delete'}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Execution Result Modal */}
       {executionResultModal && (

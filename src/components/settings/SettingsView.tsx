@@ -26,10 +26,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [form, setForm] = useState<SystemSettings>({ ...settings });
   const [isSaved, setIsSaved] = useState(false);
 
+  // Password change state
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [passwordStatus, setPasswordStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({ type: null, message: '' });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
   const handleSave = () => {
     onUpdateSettings(form);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordStatus({ type: null, message: '' });
+
+    if (!currentPasswordInput) {
+      setPasswordStatus({ type: 'error', message: 'لطفاً رمز عبور فعلی سیستم را وارد کنید.' });
+      return;
+    }
+    if (!newPasswordInput || newPasswordInput.length < 4) {
+      setPasswordStatus({ type: 'error', message: 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.' });
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setPasswordStatus({ type: 'error', message: 'رمز عبور جدید با تکرار آن مطابقت ندارد.' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: currentPasswordInput,
+          newPassword: newPasswordInput,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPasswordStatus({ type: 'success', message: data.message || 'رمز عبور پنل با موفقیت تغییر یافت.' });
+        setCurrentPasswordInput('');
+        setNewPasswordInput('');
+        setConfirmPasswordInput('');
+      } else {
+        setPasswordStatus({ type: 'error', message: data.error || 'خطا در تغییر رمز عبور.' });
+      }
+    } catch {
+      setPasswordStatus({ type: 'error', message: 'خطا در ارتباط با سرور.' });
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   const handleToggleEmergency = () => {
@@ -167,6 +217,80 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Active concurrent execution slots in background engine.
             </span>
           </div>
+        </div>
+
+        {/* Panel Security & Password Change */}
+        <div className="pt-4 border-t border-slate-800 space-y-4">
+          <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <Shield className="h-4 w-4 text-emerald-400" />
+            <span>{isRtl ? 'امنیت پنل و تغییر رمز عبور ورودی' : 'Panel Security & Password'}</span>
+          </h4>
+
+          {passwordStatus.type && (
+            <div
+              className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                passwordStatus.type === 'success'
+                  ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300'
+                  : 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+              }`}
+            >
+              <span>{passwordStatus.message}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  {isRtl ? 'رمز عبور فعلی:' : 'Current Password:'}
+                </label>
+                <input
+                  type="password"
+                  value={currentPasswordInput}
+                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl bg-slate-950 px-3 py-2 text-xs text-white border border-slate-800 focus:border-indigo-500 focus:outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  {isRtl ? 'رمز عبور جدید:' : 'New Password:'}
+                </label>
+                <input
+                  type="password"
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  placeholder="حداقل ۴ کاراکتر"
+                  className="w-full rounded-xl bg-slate-950 px-3 py-2 text-xs text-white border border-slate-800 focus:border-indigo-500 focus:outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  {isRtl ? 'تکرار رمز عبور جدید:' : 'Confirm New Password:'}
+                </label>
+                <input
+                  type="password"
+                  value={confirmPasswordInput}
+                  onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                  placeholder="حداقل ۴ کاراکتر"
+                  className="w-full rounded-xl bg-slate-950 px-3 py-2 text-xs text-white border border-slate-800 focus:border-indigo-500 focus:outline-none font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={isChangingPassword}
+                className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
+              >
+                <Key className="h-3.5 w-3.5" />
+                <span>{isChangingPassword ? (isRtl ? 'در حال به روزرسانی...' : 'Updating...') : (isRtl ? 'تغییر و ذخیره رمز عبور' : 'Change Password')}</span>
+              </button>
+            </div>
+          </form>
         </div>
 
         {/* Telegram App Credentials config */}

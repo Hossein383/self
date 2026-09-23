@@ -83,34 +83,72 @@ class CentralStore {
 
   constructor() {
     this.loadFromStorage();
-    this.startBackgroundScheduler();
+    this.fetchServerState();
+    this.startServerPolling();
   }
 
-  private startBackgroundScheduler() {
-    if (this.schedulerTimer) return;
-    this.schedulerTimer = setInterval(async () => {
-      if (this.systemSettings.emergencyHalt) return;
-
-      const now = Date.now();
-      for (const campaign of [...this.campaigns]) {
-        if (campaign.status !== 'ACTIVE') continue;
-        if (this.runningCampaigns.has(campaign.id)) continue;
-
-        const intervalMs = Math.max(1, campaign.intervalMinutes || 1) * 60000;
-        const lastRun = campaign.lastRunAt ? new Date(campaign.lastRunAt).getTime() : 0;
-
-        if (!campaign.lastRunAt || lastRun + intervalMs <= now) {
-          this.runningCampaigns.add(campaign.id);
-          try {
-            await this.executeCampaignNow(campaign.id);
-          } catch (err) {
-            console.error(`[Scheduler Engine] Error executing campaign ${campaign.id}:`, err);
-          } finally {
-            this.runningCampaigns.delete(campaign.id);
-          }
+  async fetchServerState() {
+    try {
+      const res = await fetch('/api/store/state');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.state) {
+          this.applyServerState(data.state);
         }
       }
+    } catch {
+      // Disconnected / Offline
+    }
+  }
+
+  private startServerPolling() {
+    if (typeof window === 'undefined') return;
+    setInterval(() => {
+      this.fetchServerState();
     }, 3000);
+  }
+
+  private applyServerState(serverState: any) {
+    if (!serverState || typeof serverState !== 'object') return;
+    let hasChanges = false;
+
+    if (Array.isArray(serverState.accounts) && JSON.stringify(this.accounts) !== JSON.stringify(serverState.accounts)) {
+      this.accounts = serverState.accounts;
+      hasChanges = true;
+    }
+    if (Array.isArray(serverState.proxies) && JSON.stringify(this.proxies) !== JSON.stringify(serverState.proxies)) {
+      this.proxies = serverState.proxies;
+      hasChanges = true;
+    }
+    if (Array.isArray(serverState.targets) && JSON.stringify(this.targets) !== JSON.stringify(serverState.targets)) {
+      this.targets = serverState.targets;
+      hasChanges = true;
+    }
+    if (Array.isArray(serverState.campaigns) && JSON.stringify(this.campaigns) !== JSON.stringify(serverState.campaigns)) {
+      this.campaigns = serverState.campaigns;
+      hasChanges = true;
+    }
+    if (Array.isArray(serverState.deliveryLogs) && JSON.stringify(this.deliveryLogs) !== JSON.stringify(serverState.deliveryLogs)) {
+      this.deliveryLogs = serverState.deliveryLogs;
+      hasChanges = true;
+    }
+    if (Array.isArray(serverState.errorLogs) && JSON.stringify(this.errorLogs) !== JSON.stringify(serverState.errorLogs)) {
+      this.errorLogs = serverState.errorLogs;
+      hasChanges = true;
+    }
+    if (Array.isArray(serverState.auditLogs) && JSON.stringify(this.auditLogs) !== JSON.stringify(serverState.auditLogs)) {
+      this.auditLogs = serverState.auditLogs;
+      hasChanges = true;
+    }
+    if (serverState.systemSettings && JSON.stringify(this.systemSettings) !== JSON.stringify(serverState.systemSettings)) {
+      this.systemSettings = serverState.systemSettings;
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      this.saveToStorage();
+      this.listeners.forEach((l) => l());
+    }
   }
 
   private loadFromStorage() {
@@ -165,7 +203,34 @@ class CentralStore {
 
   private notify() {
     this.saveToStorage();
+    this.saveToServer();
     this.listeners.forEach((l) => l());
+  }
+
+  async saveToServer() {
+    try {
+      const stateToSave = {
+        accounts: this.accounts,
+        proxies: this.proxies,
+        targets: this.targets,
+        campaigns: this.campaigns,
+        jobs: this.jobs,
+        plans: this.plans,
+        backups: this.backups,
+        deliveryLogs: this.deliveryLogs,
+        errorLogs: this.errorLogs,
+        auditLogs: this.auditLogs,
+        systemSettings: this.systemSettings,
+      };
+
+      await fetch('/api/store/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: stateToSave }),
+      });
+    } catch (err) {
+      console.warn('[Store] Save to server failed:', err);
+    }
   }
 
   getState() {
@@ -581,6 +646,27 @@ class CentralStore {
   }
 
   async executeCampaignNow(campaignId: string): Promise<{ success: boolean; message: string; results: { targetTitle: string; success: boolean; error?: string }[] }> {
+    try {
+      const res = await fetch('/api/store/execute-campaign-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.state) {
+          this.applyServerState(data.state);
+        }
+        return {
+          success: true,
+          message: data.message || 'ارسال فوری با موفقیت روی سرور انجام شد.',
+          results: [],
+        };
+      }
+    } catch (err) {
+      console.warn('[Store] Execute campaign now server call failed, falling back to client:', err);
+    }
+
     const campaign = this.campaigns.find((c) => c.id === campaignId);
     if (!campaign) {
       return { success: false, message: 'کمپین یافت نشد.', results: [] };
@@ -595,6 +681,7 @@ class CentralStore {
     let successCount = 0;
     let failCount = 0;
 
+    let i = 0;
     for (const targetId of campaign.targetIds) {
       const target = this.targets.find((t) => t.id === targetId);
       const targetTitle = target ? target.title : targetId;
@@ -609,6 +696,16 @@ class CentralStore {
         failCount++;
         continue;
       }
+
+      // Anti-Ban Human Delay between different targets (30 to 90 seconds)
+      if (i > 0) {
+        const minDelay = 30; // seconds
+        const maxDelay = 90; // seconds
+        const randomSeconds = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+        console.log(`[Anti-Ban Human Delay Client Side] Sleeping for ${randomSeconds}s before sending message to target "${targetTitle}"...`);
+        await new Promise((res) => setTimeout(res, randomSeconds * 1000));
+      }
+      i++;
 
       const proxyObj = account.proxyId ? this.proxies.find((p) => p.id === account.proxyId) : undefined;
 
